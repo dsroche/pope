@@ -1,4 +1,9 @@
-#!/usr/bin/env python3
+##################################################################
+# This file is part of the POPE implementation.                  #
+# Paper at https://eprint.iacr.org/2015/1106                     #
+# U.S. Government work product, in the public domain.            #
+# Written in 2015 by Daniel S. Roche, roche@usna.edu             #
+##################################################################
 
 """
 The POPE represents an encrypted key/value store that supports
@@ -7,8 +12,6 @@ to the the server. The data structure itself is based on buffer
 trees, and comparisons are only performed on search operations.
 The performance is best when the number of insertions vastly outnumbers
 the number of range queries.
-
-Authored 2015 by Daniel S. Roche; US Government work in the public domain.
 """
 
 import random

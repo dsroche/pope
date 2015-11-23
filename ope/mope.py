@@ -1,12 +1,15 @@
-#!/usr/bin/env python3
+##################################################################
+# This file is part of the POPE implementation.                  #
+# Paper at https://eprint.iacr.org/2015/1106                     #
+# U.S. Government work product, in the public domain.            #
+# Written in 2015 by Daniel S. Roche, roche@usna.edu             #
+##################################################################
 
 """
 This is the mOPE protocol accodring to
 Popa, Li, Zeldovich. "An Ideal-Security Protocol for Order-Preserving 
 Encoding". 2013 IEEE Symposium of Security and Privacy,
 https://eprint.iacr.org/2013/129
-
-Authored 2015 by Daniel S. Roche; US Government work in the public domain.
 """
 
 import bisect
