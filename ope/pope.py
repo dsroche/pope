@@ -35,17 +35,16 @@ class Pope:
         assert val is not None
         self._root.insert(key, val)
 
-    def split(self, keys, in_order=False):
+    def split(self, keys):
         """Prepares to search for any of the keys in the given list.
 
+        The keys must be sorted in plaintext order.
         After this, a lookup or range search for any of those keys will
         only cost O(height).
         Returns a list of (label, leaf node) tuples.
         """
         # can only deal in size-L chunks.
         assert len(keys) <= self._tsize
-        if not in_order and len(keys) > 1:
-            keys = self._cmp.sort(keys)
         splits = list(self._root.split(keys))
         for _, leaf in splits:
             if leaf.parent:
@@ -54,11 +53,11 @@ class Pope:
 
     def lookup(self, key):
         """Returns the corresponding value, or None if not found."""
-        [(_, leaf)] = self.split([key], True)
+        [(_, leaf)] = self.split([key])
         return leaf.lookup(key)
     
     def range_search(self, key1, key2):
-        [(_1, node1), (_2, node2)] = self.split([key1,key2], True)
+        [(_1, node1), (_2, node2)] = self.split([key1,key2])
         # left_ind and right_ind are the actual keys at the leaf level.
         # at higher levels, they are child nodes.
         left_ind, right_ind = key1, key2
@@ -129,23 +128,20 @@ class LeafNode:
     def range_search(self, key1, key2):
         """Iterates through all (key,value) pairs in the range key1 <= key <= key2."""
         assert len(self.buffer) <= self.serv._tsize
-        self.buffer, [(_1, ind1), (_2, ind2)] = self.serv._cmp.partition_sort(
-            [key1,key2], self.buffer, haykey=first)
-        return self.buffer[ind1: ind2]
+        for item, ind in self.serv._cmp.partition(self.buffer, [key1, key2], nkey=first):
+            if ind == 1: yield item
             
     def range_right(self, key1):
         """Iterates through all (key,value) pairs satisfying key >= key1."""
         assert len(self.buffer) <= self.serv._tsize
-        self.buffer, [(_,ind1)] = self.serv._cmp.partition_sort(
-            [key1], self.buffer, haykey=first)
-        return self.buffer[ind1:]
+        for item, ind in self.serv._cmp.partition(self.buffer, [key1], nkey=first):
+            if ind == 1: yield item
         
     def range_left(self, key2):
         """Iterates through all (key,value) pairs satisfying key <= key2."""
         assert len(self.buffer) <= self.serv._tsize
-        self.buffer, [(_,ind2)] = self.serv._cmp.partition_sort(
-            [key2], self.buffer, haykey=first)
-        return self.buffer[:ind2]
+        for item, ind in self.serv._cmp.partition(self.buffer, [key2], nkey=first):
+            if ind == 0: yield item
 
     def traverse(self):
         """Iterates through all (key,value) pairs."""
