@@ -36,7 +36,6 @@ class Oracle:
         self._data_out = 0
         self._rounds = 0
         self._tsize = size
-        self._revealed = set()
 
     @property
     def max_size(self):
@@ -63,7 +62,6 @@ class Oracle:
         sdhay = sorted(self.crypt.decode(haykey(x)) for x in haystack)
         assert all(sdhay[i] <= sdhay[i+1]
             for i in range(len(haystack)-1))
-        self._revealed.update(sdhay)
         for needle in needles:
             self._data_in += 1
             self._data_out += 1
@@ -136,8 +134,3 @@ class Oracle:
         ci, co, cr, ms = self.counts(reset)
         print("Over {} rounds, transferred {} to Cmp and {} from Cmp. Max size {}."
             .format(cr,ci,co,ms))
-
-    def revealed(self):
-        """Returns whose orders have been revealed to the server."""
-        return self._revealed
-

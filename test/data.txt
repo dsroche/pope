@@ -1,0 +1,4 @@
+(1) salary2014nz.csv
+    Source: California public employees payroll information
+    Post-processing: remove zero salaries and invalid entries
+    http://transparentcalifornia.com/downloads/
