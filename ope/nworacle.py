@@ -11,12 +11,16 @@ server to connect to a comparison oracle.
 """
 
 import socket
+import socketserver
 import pickle
 
 """Single byte op-codes"""
 PARTITION = b'p'
 PARTITION_SORT = b's'
 FIND = b'f'
+MAX_SIZE = b'm'
+
+DEBUG = True
 
 # convenience method
 def identity(x):
@@ -32,6 +36,19 @@ class OracleClient:
         and port."""
         self._addr = (hostname, port)
 
+        # go get the max size
+        with socket.create_connection(self._addr) as conn:
+            with conn.makefile('rwb') as sockfile:
+                # send opcode
+                sockfile.write(MAX_SIZE)
+                sockfile.flush()
+
+                self._max_size = pickle.load(sockfile)
+
+    @property
+    def max_size(self):
+        return self._max_size
+
     def partition(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like partition() in oracle.Oracle."""
         with socket.create_connection(self._addr) as conn:
@@ -44,7 +61,9 @@ class OracleClient:
                 pickle.dump(haykey, sockfile)
 
                 # do partition
-                return self._do_partition(needles, nkey, sockfile)
+                res = self._do_partition(needles, nkey, sockfile)
+
+        return res
 
     def partition_sort(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like partition_sort() in oracle.Oracle."""
@@ -62,7 +81,9 @@ class OracleClient:
                 shay = pickle.load(sockfile)
 
                 # do the partition
-                return shay, self._do_partition(needles, nkey, sockfile)
+                res = self._do_partition(needles, nkey, sockfile)
+
+        return shay, res
 
     def _do_partition(self, needles, nkey, sockfile):
         """Convenience method for partition() and partition_sort()"""
@@ -80,8 +101,9 @@ class OracleClient:
         sockfile.flush()
 
         # receive results
-        for _ in range(count):
-            yield pickle.load(sockfile)
+        res = [pickle.load(sockfile) for _ in range(count)]
+        
+        return res
 
     def find(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like find() in oracle.Oracle."""
@@ -108,8 +130,9 @@ class OracleClient:
                 sockfile.flush()
 
                 # receive results
-                for _ in range(count):
-                    yield pickle.load(sockfile)
+                res = [pickle.load(sockfile) for _ in range(count)]
+
+        return res
 
 class OracleHandler(socketserver.BaseRequestHandler):
     # Note: must have field "orc" added to point to the underlying Oracle instance
@@ -120,13 +143,23 @@ class OracleHandler(socketserver.BaseRequestHandler):
             opcode = sockfile.read(1)
 
             if opcode == PARTITION:
+                if DEBUG: print("Received PARTITION request")
                 self.partition(sockfile)
             elif opcode == PARTITION_SORT:
+                if DEBUG: print("Received PARTITION_SORT request")
                 self.partition_sort(sockfile)
             elif opcode == FIND:
+                if DEBUG: print("Received FIND request")
                 self.find(sockfile)
+            elif opcode == MAX_SIZE:
+                if DEBUG: print("Received MAX_SIZE request")
+                pickle.dump(self.orc.max_size, sockfile)
+                sockfile.flush()
             else:
                 raise RuntimeError("ORACLE ERROR: invalid opcode", opcode)
+            if DEBUG:
+                print("(finished request)")
+                print()
 
     def stream_until_none(self, sockfile):
         while True:
@@ -191,21 +224,8 @@ class OracleHandler(socketserver.BaseRequestHandler):
 
         sockfile.flush()
 
-
-class OracleServer:
-    """Wrapper class to listen for connections and relay them to the actual Oracle instance."""
-
-    def __init__(self, orc, hostname, port):
-        """Creates a server that will relay requests to the given oracle."""
-        self._addr = (hostname, port)
-        class Handler(OracleHandler):
-            orc = orc
-        self._Handler = Handler
-        self._serv = None
-
-    def start(self):
-        if self._serv is None:
-            self._serv = socketserver.TCPServer(self._addr, self._Handler)
-            self._serv.serve_forever()
-
-# TODO FIXME here
+def get_oracle_server(the_oracle, hostname, port):
+    """Creates a socketserver to relay requests to given oracle."""
+    class Handler(OracleHandler):
+        orc = the_oracle
+    return socketserver.TCPServer((hostname, port), Handler)

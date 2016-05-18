@@ -92,10 +92,6 @@ def update_bigimage(row, img, allkeys, revealed):
     rimg = Image.new('L', (len(allkeys), 1), 255)
     for col in revealed.revind:
         rimg.putpixel((col,0), 0)
-    # TODO remove
-    # for col, (_,ck) in enumerate(allkeys):
-    #     if ck in revealed:
-    #         rimg.putpixel((col,0), 0)
     rimg = rimg.resize((img.size[0], 1), Image.BILINEAR)
     img.paste(rimg, (0,row))
 
@@ -104,11 +100,6 @@ def make_sqimage(dim, allkeys, revealed):
     n = len(allkeys)
     img = Image.new('L', (dim, n), 128)
     rimg = Image.new('L', (n-1, 1), 0)
-    # TODO remove
-    # comps = []
-    # for ind, (_,ck) in enumerate(allkeys):
-    #     if ck in revealed:
-    #         comps.append(ind)
     row = 0
     prevind = 0
     for ind in revealed.revind:
