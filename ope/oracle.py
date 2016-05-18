@@ -74,10 +74,14 @@ class Oracle:
 
         Returns the sorted haystack, and then the result of partition.
         """
+        shay = self.sort(haystack, haykey)
+        return shay, self.partition(needles, shay, nkey, haykey)
+
+    def sort(self, haystack, haykey):
         shay = sorted(haystack,
             key=lambda x: (self.crypt.decode(haykey(x))))
         self._data_out += len(shay)
-        return shay, self.partition(needles, shay, nkey, haykey)
+        return shay
 
     def find(self, needles, haystack, nkey=identity, haykey=identity):
         """Searches the given haystack for each thing in needles.
