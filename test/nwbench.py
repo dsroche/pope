@@ -16,6 +16,9 @@ import argparse
 import random
 import progbar
 import time
+import os
+import pickle
+import sys
 
 from ope.nwopec import NwOpeClient
 from ope.ciphers import AES
@@ -43,8 +46,8 @@ def get_inserts(datafile):
                 salary = float(salstring)
                 data.append((salary, convkey(salary), name))
             except ValueError:
-                print("WARNING: invalid read of line:")
-                print(line.rstrip())
+                print("WARNING: invalid read of line:", file=sys.stderr)
+                print(line.rstrip(), file=sys.stderr)
     return data
 
 def get_queries(ins, num, size=100):
@@ -67,9 +70,20 @@ def get_queries(ins, num, size=100):
         res[qtime] = (start, end, out)
     return res
 
-def main(datafile, queries, passphrase, hostname, port):
+def main(datafile, queries, passphrase, hostname, port, qfile):
     ins = get_inserts(datafile)
-    quer = get_queries(ins, queries)
+    if qfile:
+        if os.path.exists(qfile):
+            with open(qfile, 'rb') as qin:
+                quer = pickle.load(qin)
+            print("Loaded queries from", qfile, file=sys.stderr)
+        else:
+            quer = get_queries(ins, queries)
+            with open(qfile, 'wb') as qout:
+                pickle.dump(quer, qout)
+            print("Saved queries to", qfile, file=sys.stderr)
+    else:
+        quer = get_queries(ins, queries)
     crypt = AES(passphrase)
 
     elapsed = -time.time()
@@ -80,24 +94,12 @@ def main(datafile, queries, passphrase, hostname, port):
                 if i in quer:
                     ck1, ck2, check = quer[i]
                     res = opec.range_search(ck1, ck2)
-                    if sorted(res) != sorted(check):
-                        res.sort()
-                        check.sort()
-                        print("CRAP")
-                        for a, b in zip(res, check):
-                            if a != b:
-                                print(a, "<======>", b)
-                        for i in range(len(check), len(res)):
-                            print(res[i], "<======")
-                        for i in range(len(res), len(check)):
-                            print("=========>", check[i])
-                        print("OVER")
-                        print()
-                    #assert sorted(res) == sorted(check)
+                    assert sorted(res) == sorted(check)
                 pbar += 1
     elapsed += time.time()
 
-    print("successfully performed", len(ins), "insertions and", len(quer), "queries")
+    print("successfully performed", len(ins), "insertions and", len(quer), "queries", file=sys.stderr)
+    print("took", elapsed, "seconds", file=sys.stderr)
     print(elapsed)
 
 if __name__ == '__main__':
@@ -110,9 +112,10 @@ if __name__ == '__main__':
             help="How many random queries to perform (default 1000)")
     parser.add_argument('-s','--seed', type=int, default=1984,
             help="Seed to use for PRNG to make the random queries")
+    parser.add_argument('-f','--queryfile', help="file name to load/store queries")
     args = parser.parse_args()
 
     random.seed(args.seed)
-    print("The seed is", args.seed)
+    print("The seed is", args.seed, file=sys.stderr)
 
-    main(args.datafile, args.queries, args.passphrase, args.pope_hostname, args.pope_port)
+    main(args.datafile, args.queries, args.passphrase, args.pope_hostname, args.pope_port, args.queryfile)
