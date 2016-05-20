@@ -26,9 +26,11 @@ class Pope:
         """Creates a new, initially empty, storage backend, relying
         on the given comparison oracle.
         """
-
         self._cmp = oracle
         self._tsize = self._cmp.max_size
+        self._root = LeafNode(self, None)
+
+    def clear(self):
         self._root = LeafNode(self, None)
 
     def insert(self, key, val):
@@ -161,7 +163,7 @@ class LeafNode:
             # and partition everything according to those keys
             promoted, partitions = self.serv._cmp.partition_sort(
                 itertools.chain(self.buffer, ((k,None) for k in keys)),
-                (k for k,v in random.sample(self.buffer, self.serv._tsize)),
+                [k for k,v in random.sample(self.buffer, self.serv._tsize)],
                 nkey=first
             )
             # bucket[i] holds the key/value pairs for that new node.

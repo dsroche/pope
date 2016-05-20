@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ##################################################################
 # This file is part of the POPE implementation.                  #
 # Paper at https://eprint.iacr.org/2015/1106                     #
@@ -13,6 +15,10 @@ server to connect to a comparison oracle.
 import socket
 import socketserver
 import pickle
+import argparse
+
+from ope import ciphers
+from ope import oracle
 
 """Single byte op-codes"""
 PARTITION = b'p'
@@ -21,6 +27,7 @@ FIND = b'f'
 MAX_SIZE = b'm'
 
 DEBUG = True
+BUFSIZE = 1024
 
 # convenience method
 def identity(x):
@@ -35,15 +42,41 @@ class OracleClient:
         """There should be an oracle server running on the specified hostname
         and port."""
         self._addr = (hostname, port)
+        self._conn = None
+
+    def open(self):
+        """opens the connection and allows operations"""
+        if self._conn:
+            raise RuntimeError("already open")
+        self._conn = socket.create_connection(self._addr)
+        self._sockfile = self._conn.makefile('rwb')
 
         # go get the max size
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(MAX_SIZE)
-                sockfile.flush()
+        # send opcode
+        self._sockfile.write(MAX_SIZE)
+        self._sockfile.flush()
+        self._max_size = pickle.load(self._sockfile)
 
-                self._max_size = pickle.load(sockfile)
+    def __enter__(self):
+        self.open()
+        return self
+
+    def close(self):
+        """closes the connection"""
+        if not self._conn:
+            raise RuntimeError("not open; can't close it")
+        try:
+            self._sockfile.flush()
+            self._sockfile.close()
+            self._conn.close()
+        except:
+            pass
+        del self._sockfile
+        del self._conn
+        self._conn = None
+
+    def __exit__(self, t,v,r):
+        self.close()
 
     @property
     def max_size(self):
@@ -51,115 +84,115 @@ class OracleClient:
 
     def partition(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like partition() in oracle.Oracle."""
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(PARTITION)
+        # send opcode
+        self._sockfile.write(PARTITION)
 
-                # send haystack and haykey
-                pickle.dump(haystack, sockfile)
-                pickle.dump(haykey, sockfile)
+        # send haystack and haykey
+        pickle.dump(haystack, self._sockfile)
+        pickle.dump(haykey, self._sockfile)
 
-                # do partition
-                res = self._do_partition(needles, nkey, sockfile)
+        # send nkey
+        pickle.dump(nkey, self._sockfile)
+
+        # do partition
+        res = self._send_rec_stream(needles)
 
         return res
 
     def partition_sort(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like partition_sort() in oracle.Oracle."""
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(PARTITION_SORT)
+        # send opcode
+        self._sockfile.write(PARTITION_SORT)
 
-                # send haystack and haykey
-                pickle.dump(haystack, sockfile)
-                pickle.dump(haykey, sockfile)
-                sockfile.flush()
+        # send haystack and haykey
+        pickle.dump(haystack, self._sockfile)
+        pickle.dump(haykey, self._sockfile)
+        self._sockfile.flush()
 
-                # receive sorted haystack
-                shay = pickle.load(sockfile)
+        # receive sorted haystack
+        shay = pickle.load(self._sockfile)
 
-                # do the partition
-                res = self._do_partition(needles, nkey, sockfile)
+        # send nkey
+        pickle.dump(nkey, self._sockfile)
+
+        # do the partition
+        res = self._send_rec_stream(needles)
 
         return shay, res
 
-    def _do_partition(self, needles, nkey, sockfile):
-        """Convenience method for partition() and partition_sort()"""
-        # send nkey
-        pickle.dump(nkey, sockfile)
-
-        # stream needles
+    def _send_rec_stream(self, outvals):
+        """Convenience method to send and receive a stream of the same length,
+        buffered according to global variable BUFSIZE."""
+        res = []
+        
         count = 0
-        for needle in needles:
-            pickle.dump(needle, sockfile)
+        for x in outvals:
+            pickle.dump(x, self._sockfile)
             count += 1
+            
+            # stop sending and receive some results
+            if count == BUFSIZE:
+                self._sockfile.flush()
+                res.extend(pickle.load(self._sockfile) for _ in range(BUFSIZE))
+                count = 0
 
         # indicate end
-        pickle.dump(None, sockfile)
-        sockfile.flush()
+        pickle.dump(None, self._sockfile)
+        self._sockfile.flush()
 
-        # receive results
-        res = [pickle.load(sockfile) for _ in range(count)]
-        
+        # receive any remaining results
+        res.extend(pickle.load(self._sockfile) for _ in range(count))
+
         return res
 
     def find(self, needles, haystack, nkey=identity, haykey=identity):
         """Just like find() in oracle.Oracle."""
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(FIND)
+        # send opcode
+        self._sockfile.write(FIND)
 
-                # send haystack and haykey
-                pickle.dump(haystack, sockfile)
-                pickle.dump(haykey, sockfile)
+        # send haystack and haykey
+        pickle.dump(haystack, self._sockfile)
+        pickle.dump(haykey, self._sockfile)
 
-                # send nkey
-                pickle.dump(nkey, sockfile)
+        # send nkey
+        pickle.dump(nkey, self._sockfile)
 
-                # stream needles
-                count = 0
-                for needle in needles:
-                    pickle.dump(needle, sockfile)
-                    count += 1
-
-                # indicate end
-                pickle.dump(None, sockfile)
-                sockfile.flush()
-
-                # receive results
-                res = [pickle.load(sockfile) for _ in range(count)]
+        # find everything
+        res = self._send_rec_stream(needles)
 
         return res
+
 
 class OracleHandler(socketserver.BaseRequestHandler):
     # Note: must have field "orc" added to point to the underlying Oracle instance
 
     def handle(self):
         with self.request.makefile('rwb') as sockfile:
-            # receive opcode
-            opcode = sockfile.read(1)
-
-            if opcode == PARTITION:
-                if DEBUG: print("Received PARTITION request")
-                self.partition(sockfile)
-            elif opcode == PARTITION_SORT:
-                if DEBUG: print("Received PARTITION_SORT request")
-                self.partition_sort(sockfile)
-            elif opcode == FIND:
-                if DEBUG: print("Received FIND request")
-                self.find(sockfile)
-            elif opcode == MAX_SIZE:
-                if DEBUG: print("Received MAX_SIZE request")
-                pickle.dump(self.orc.max_size, sockfile)
-                sockfile.flush()
-            else:
-                raise RuntimeError("ORACLE ERROR: invalid opcode", opcode)
-            if DEBUG:
-                print("(finished request)")
-                print()
+            if DEBUG: print("Connection open")
+            while True:
+                # receive opcode
+                opcode = sockfile.read(1)
+                if not opcode:
+                    if DEBUG: print("Connection closed")
+                    return
+                elif opcode == PARTITION:
+                    if DEBUG: print("Received PARTITION request")
+                    self.partition(sockfile)
+                elif opcode == PARTITION_SORT:
+                    if DEBUG: print("Received PARTITION_SORT request")
+                    self.partition_sort(sockfile)
+                elif opcode == FIND:
+                    if DEBUG: print("Received FIND request")
+                    self.find(sockfile)
+                elif opcode == MAX_SIZE:
+                    if DEBUG: print("Received MAX_SIZE request")
+                    pickle.dump(self.orc.max_size, sockfile)
+                    sockfile.flush()
+                else:
+                    raise RuntimeError("ORACLE ERROR: invalid opcode", opcode)
+                if DEBUG:
+                    print("(finished request)")
+                    print()
 
     def stream_until_none(self, sockfile):
         while True:
@@ -167,6 +200,16 @@ class OracleHandler(socketserver.BaseRequestHandler):
             if obj is None:
                 break
             yield obj
+
+    def _stream_back(self, sockfile, L):
+        """sends back the list or generator, stopping occationally to flush"""
+        count = 0
+        for x in L:
+            pickle.dump(x, sockfile)
+            count += 1
+            if count == BUFSIZE:
+                sockfile.flush()
+                count = 0
 
     def partition(self, sockfile):
         # read haystack and haykey
@@ -180,8 +223,7 @@ class OracleHandler(socketserver.BaseRequestHandler):
         needles = self.stream_until_none(sockfile)
 
         # stream back results
-        for res in self.orc.partition(needles, haystack, nkey, haykey):
-            pickle.dump(res, sockfile)
+        self._stream_back(sockfile, self.orc.partition(needles, haystack, nkey, haykey))
 
         sockfile.flush()
 
@@ -202,8 +244,7 @@ class OracleHandler(socketserver.BaseRequestHandler):
         needles = self.stream_until_none(sockfile)
 
         # stream back results
-        for res in self.orc.partition(needles, shay, nkey, haykey):
-            pickle.dump(res, sockfile)
+        self._stream_back(sockfile, self.orc.partition(needles, shay, nkey, haykey))
 
         sockfile.flush()
 
@@ -219,8 +260,7 @@ class OracleHandler(socketserver.BaseRequestHandler):
         needles = self.stream_until_none(sockfile)
 
         # stream back results
-        for res in self.orc.find(needles, haystack, nkey, haykey):
-            pickle.dump(res, sockfile)
+        self._stream_back(sockfile, self.orc.find(needles, haystack, nkey, haykey))
 
         sockfile.flush()
 

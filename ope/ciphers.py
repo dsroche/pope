@@ -36,7 +36,7 @@ class AES:
         r = Crypto.Random.new()
         if self.key:
             h = Crypto.Hash.MD5.new()
-            h.update(self.key)
+            h.update(self.key.encode('utf8'))
             self.realkey = h.digest()
         else:
             self.realkey = r.read(16)

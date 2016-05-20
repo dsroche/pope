@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ##################################################################
 # This file is part of the POPE implementation.                  #
 # Paper at https://eprint.iacr.org/2015/1106                     #
@@ -13,8 +15,13 @@ client and POPE server interface.
 import socket
 import socketserver
 import pickle
+import argparse
+
+from ope import pope
+from ope import nworacle
 
 """Single byte op-codes"""
+CLEAR = b'c'
 INSERT = b'i'
 LOOKUP = b'l'
 RANGE_SEARCH = b'r'
@@ -27,7 +34,7 @@ class NwOpeClient:
     """Same functionality as opec.OpeClient, except only works with POPE and
     does it over a network."""
 
-    def __init__(self, hostname, port, crypt):
+    def __init__(self, hostname, port, crypt, clearit=True):
         """hostname and port are for the POPE server.
 
         The given encryption algorithm crypt must support encode() and
@@ -36,80 +43,114 @@ class NwOpeClient:
         """
         self._addr = (hostname, port)
         self._crypt = crypt
+        self._needs_clear = clearit
+        self._conn = None
+
+    def open(self):
+        """opens the connection and allows operations"""
+        if self._conn:
+            raise RuntimeError("already open")
+        self._conn = socket.create_connection(self._addr)
+        self._sockfile = self._conn.makefile('rwb')
+
+        if self._needs_clear:
+            self._sockfile.write(CLEAR)
+            self._sockfile.flush()
+            self._needs_clear = False
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def close(self):
+        """closes the connection"""
+        if not self._conn:
+            raise RuntimeError("not open; can't close it")
+        try:
+            self._sockfile.flush()
+            self._sockfile.close()
+            self._conn.close()
+        except:
+            pass
+        del self._sockfile
+        del self._conn
+        self._conn = None
+
+    def __exit__(self, t,v,r):
+        self.close()
 
     def insert(self, key, value):
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(INSERT)
+        # send opcode
+        self._sockfile.write(INSERT)
 
-                # send key and value
-                pickle.dump(self._crypt.encode(key), sockfile)
-                pickle.dump(self._crypt.encode(value), sockfile)
+        # send key and value
+        pickle.dump(self._crypt.encode(key), self._sockfile)
+        pickle.dump(self._crypt.encode(value), self._sockfile)
 
-                sockfile.flush()
+        self._sockfile.flush()
 
     def lookup(self, key):
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(LOOKUP)
+        # send opcode
+        self._sockfile.write(LOOKUP)
 
-                # send key
-                pickle.dump(self._crypt.encode(key), sockfile)
-                sockfile.flush()
+        # send key
+        pickle.dump(self._crypt.encode(key), self._sockfile)
+        self._sockfile.flush()
 
-                # receive result
-                encval = pickle.load(sockfile)
+        # receive result
+        encval = pickle.load(self._sockfile)
+
+        self._sockfile.flush()
 
         if encval is None:
             return None
         else:
             return self._crypt.decode(encval)
 
-    def stream_until_none(self, sockfile):
+    def stream_until_none(self):
         while True:
-            obj = pickle.load(sockfile)
+            obj = pickle.load(self._sockfile)
             if obj is None:
                 break
             yield obj
+        self._sockfile.flush()
 
     def range_search(self, key1, key2):
         if key2 < key1:
             return
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(RANGE_SEARCH)
+        # send opcode
+        self._sockfile.write(RANGE_SEARCH)
 
-                # send keys
-                pickle.dump(self._crypt.encode(key1), sockfile)
-                pickle.dump(self._crypt.encode(key2), sockfile)
-                sockfile.flush()
+        # send keys
+        pickle.dump(self._crypt.encode(key1), self._sockfile)
+        pickle.dump(self._crypt.encode(key2), self._sockfile)
+        self._sockfile.flush()
 
-                res = [(self._crypt.decode(enkey), self._crypt.decode(enval))
-                        for enkey, enval in self.stream_until_none(sockfile)]
+        res = [(self._crypt.decode(enkey), self._crypt.decode(enval))
+                for enkey, enval in self.stream_until_none()]
+
+        self._sockfile.flush()
         
         return res
 
     def size(self):
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(SIZE)
-                sockfile.flush()
+        # send opcode
+        self._sockfile.write(SIZE)
+        self._sockfile.flush()
 
-                return pickle.load(sockfile)
+        res = pickle.load(self._sockfile)
+        self._sockfile.flush()
+        return res
 
     def traverse(self):
-        with socket.create_connection(self._addr) as conn:
-            with conn.makefile('rwb') as sockfile:
-                # send opcode
-                sockfile.write(TRAVERSE)
-                sockfile.flush()
+        # send opcode
+        self._sockfile.write(TRAVERSE)
+        self._sockfile.flush()
 
-                res = [(self._crypt.decode(enkey), self._crypt.decode(enval))
-                        for enkey, enval in self.stream_until_none(sockfile)]
+        res = [(self._crypt.decode(enkey), self._crypt.decode(enval))
+                for enkey, enval in self.stream_until_none()]
+        
+        self._sockfile.flush()
         
         return res
 
@@ -118,30 +159,37 @@ class PopeHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         with self.request.makefile('rwb') as sockfile:
-            # receive opcode
-            opcode = sockfile.read(1)
-
-            if opcode == INSERT:
-                if DEBUG: print("Received INSERT request")
-                self.insert(sockfile)
-            elif opcode == LOOKUP:
-                if DEBUG: print("Received LOOKUP request")
-                self.lookup(sockfile)
-            elif opcode == RANGE_SEARCH:
-                if DEBUG: print("Received RANGE_SEARCH request")
-                self.range_search(sockfile)
-            elif opcode == TRAVERSE:
-                if DEBUG: print("Received TRAVERSE request")
-                self.traverse(sockfile)
-            elif opcode == SIZE:
-                if DEBUG: print("Received SIZE request")
-                pickle.dump(self.serv.size(), sockfile)
-                sockfile.flush()
-            else:
-                raise RuntimeError("POPE SERVER ERROR: invalid opcode", opcode)
-            if DEBUG:
-                print("(finished request)")
-                print()
+            if DEBUG: print("Connection open")
+            while True:
+                # receive opcode
+                opcode = sockfile.read(1)
+                if not opcode:
+                    if DEBUG: print("Connection closed")
+                    return
+                elif opcode == CLEAR:
+                    if DEBUG: print("Received CLEAR request")
+                    self.serv.clear()
+                elif opcode == INSERT:
+                    if DEBUG: print("Received INSERT request")
+                    self.insert(sockfile)
+                elif opcode == LOOKUP:
+                    if DEBUG: print("Received LOOKUP request")
+                    self.lookup(sockfile)
+                elif opcode == RANGE_SEARCH:
+                    if DEBUG: print("Received RANGE_SEARCH request")
+                    self.range_search(sockfile)
+                elif opcode == TRAVERSE:
+                    if DEBUG: print("Received TRAVERSE request")
+                    self.traverse(sockfile)
+                elif opcode == SIZE:
+                    if DEBUG: print("Received SIZE request")
+                    pickle.dump(self.serv.size(), sockfile)
+                    sockfile.flush()
+                else:
+                    raise RuntimeError("POPE SERVER ERROR: invalid opcode", opcode)
+                if DEBUG:
+                    print("(finished request)")
+                    print()
     
     def insert(self, sockfile):
         # get key and value
@@ -185,7 +233,6 @@ class PopeHandler(socketserver.BaseRequestHandler):
             pickle.dump(x, sockfile)
         pickle.dump(None, sockfile)
         sockfile.flush()
-
 
 def get_pope_server(the_pope, hostname, port):
     """Creates a socketserver to relay requests to given POPE instance."""
