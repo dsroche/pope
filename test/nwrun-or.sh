@@ -33,12 +33,13 @@ datfile="salary2014nz.csv"
 qfile="nwbench-data/full-${qsize}q-${seed}s-${rsize}l.queries"
 
 nwspeed="$scdir/nwspeed.sh"
-resfile="$scdir/nwdata.txt"
+resfile="$scdir/nwdata-or.txt"
 
 echo "Will run $(( num_lat * num_bw )) experiments using query file"
 echo "$qfile"
 
 ports="12345 12344"
+op=12345
 pp=12344
 pw=abc
 
@@ -46,8 +47,8 @@ for (( cur_lat=lat_start ; cur_lat <= lat_end ; cur_lat=(cur_lat + lat_step) ));
   for (( cur_bw=bw_start ; cur_bw >= bw_end ; cur_bw=(cur_bw - bw_step) )); do
     echo "============================================================"
     echo "Running with latency $cur_lat and bandwidth $cur_bw"
-    "$nwspeed" on $cur_lat $cur_bw $ports
-    res=$(python3 -OO nwbench.py 127.0.0.1 $pp "$pw" "$datfile" "$qsize" -f "$qfile")
+    "$nwspeed" on $cur_lat $cur_bw $op
+    res=$(python3 -OO nwbench-or.py 127.0.0.1 "$op" "$pw" "$datfile" "$qsize" -f "$qfile")
     echo "$qsize,$rsize,$cur_lat,$cur_bw,$res" >> "$resfile"
     "$nwspeed" off
     echo
