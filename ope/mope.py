@@ -22,6 +22,11 @@ class Mope:
         self._encodings = []
         self._data = collections.defaultdict(lambda: [])
 
+    def clear(self):
+        self._tree = LeafNode(self, [], [])
+        self._encodings = []
+        self._data = collections.defaultdict(lambda: [])
+
     def encode(self, key, insert):
         """Does the OPE encoding of the given ciphertext.
         

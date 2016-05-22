@@ -6,11 +6,11 @@ set -u
 scdir=$(dirname "$(readlink -f "$0")")
 
 function usage {
-  echo "Usage: $0 qsize seed rsize lat_start lat_end lat_step bw_start bw_end bw_step"
+  echo "Usage: $0 qsize seed rsize lat_start lat_end lat_step bw_start bw_end bw_step, resfile"
   [[ $# -ge 1 ]] && exit $1
 }
 
-[[ $# -eq 9 ]] || usage 1
+[[ $# -eq 10 ]] || usage 1
 
 qsize=$1
 seed=$2
@@ -21,6 +21,7 @@ lat_step=$6
 bw_start=$7
 bw_end=$8
 bw_step=$9
+resfile=$(readlink -f $10)
 
 [[ $lat_start -le $lat_end ]] || usage 2
 [[ $bw_start -ge $bw_end ]] || usage 3
@@ -33,7 +34,6 @@ datfile="salary2014nz.csv"
 qfile="nwbench-data/full-${qsize}q-${seed}s-${rsize}l.queries"
 
 nwspeed="$scdir/nwspeed.sh"
-resfile="$scdir/nwdata.txt"
 
 echo "Will run $(( num_lat * num_bw )) experiments using query file"
 echo "$qfile"
